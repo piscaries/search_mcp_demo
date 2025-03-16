@@ -54,8 +54,11 @@ poetry --version
 ### Step 3: Install Dependencies
 
 ```bash
-poetry install
+# Install dependencies without installing the project as a package
+poetry install --no-root
 ```
+
+> **Note:** We use the `--no-root` flag to avoid package installation issues, as this project is meant to be run directly, not installed as a package.
 
 ### Step 4: Set Up Elasticsearch
 
@@ -200,9 +203,12 @@ If you encounter problems with Elasticsearch:
 
 If you have issues with Poetry:
 
-1. Try updating Poetry: `poetry self update`
-2. Clear Poetry's cache: `poetry cache clear pypi --all`
-3. Update dependencies: `poetry update`
+1. Make sure you're using the `--no-root` flag: `poetry install --no-root`
+2. If you encounter package name errors, check that the package name in `pyproject.toml` matches the directory structure
+3. Try updating Poetry: `poetry self update`
+4. Clear Poetry's cache: `poetry cache clear pypi --all`
+5. Update dependencies: `poetry update`
+6. If all else fails, delete the `poetry.lock` file and run `poetry install --no-root` again
 
 ### OpenAI API Issues
 

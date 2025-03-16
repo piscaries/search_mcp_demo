@@ -1,0 +1,11 @@
+# Byte-compiled and cache files
+*.pyc
+__pycache__/
+
+# Virtual environment
+venv/
+.env
+
+# Logs and temporary files
+*.log
+

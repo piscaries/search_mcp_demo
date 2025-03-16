@@ -106,12 +106,14 @@ class MCPClient:
             + "\n"
         )
 
+        # Always print steps 1-3 for clarity
+        print(f"\n🔄 STEP 1: LLM decides to use the '{tool_name}' tool")
+        print(
+            f"🔄 STEP 2: LLM prepares tool call with arguments: {json.dumps(args, indent=2)}"
+        )
+        print(f"🔄 STEP 3: Sending message to MCP server")
+
         if self.debug_mode:
-            print(f"\n🔄 STEP 1: LLM decides to use the '{tool_name}' tool")
-            print(
-                f"🔄 STEP 2: LLM prepares tool call with arguments: {json.dumps(args, indent=2)}"
-            )
-            print(f"🔄 STEP 3: Sending message to MCP server")
             print(f"📤 Outgoing message: {message.strip()}")
 
         try:
@@ -129,8 +131,10 @@ class MCPClient:
                 if readable:
                     line = self.server_process.stdout.readline().strip()
                     if line:
+                        # Always print step 6
+                        print(f"🔄 STEP 6: Receiving response from MCP server")
+
                         if self.debug_mode:
-                            print(f"🔄 STEP 6: Receiving response from MCP server")
                             print(f"📥 Incoming response: {line}")
 
                         try:
@@ -143,11 +147,33 @@ class MCPClient:
 
                                 # Extract and display the query plan
                                 if tool_name == "search" and "Query plan:" in result:
-                                    if self.debug_mode:
-                                        print(
-                                            "\n🔄 STEP 4: OpenAI generated a query plan"
-                                        )
-                                        # Extract the query plan JSON
+                                    # Always print step 4
+                                    print("\n🔄 STEP 4: OpenAI generated a query plan")
+
+                                    # Combined approach to extract query plan - handle both formats
+                                    plan_found = False
+
+                                    # Try the format with newlines first (most common case)
+                                    match = re.search(
+                                        r"Query plan:\s*\n([\s\S]*?)(?=\n\nResults:|\Z)",
+                                        result,
+                                        re.DOTALL,
+                                    )
+                                    if match:
+                                        try:
+                                            plan_text = match.group(1).strip()
+                                            print(f"📋 Query Plan: {plan_text}")
+                                            print(
+                                                "\n🔄 STEP 5: Elasticsearch executed the search based on the query plan"
+                                            )
+                                            plan_found = True
+                                        except Exception as e:
+                                            print(
+                                                f"Error displaying query plan: {str(e)}"
+                                            )
+
+                                    # If we still didn't find it, try the inline format
+                                    if not plan_found:
                                         match = re.search(
                                             r"Query plan: (\{.*\})", result, re.DOTALL
                                         )
@@ -160,15 +186,22 @@ class MCPClient:
                                                 print(
                                                     "\n🔄 STEP 5: Elasticsearch executed the search based on the query plan"
                                                 )
+                                                plan_found = True
                                             except json.JSONDecodeError:
                                                 print(
                                                     f"Could not parse query plan: {match.group(1)}"
                                                 )
 
-                                if self.debug_mode:
-                                    print(
-                                        "🔄 STEP 7: Client parses the response and returns it to the LLM"
-                                    )
+                                    # If we still couldn't find a plan, print step 5 anyway
+                                    if not plan_found:
+                                        print(
+                                            "\n🔄 STEP 5: Elasticsearch executed the search (query plan not displayed)"
+                                        )
+
+                                # Always print step 7
+                                print(
+                                    "🔄 STEP 7: Client parses the response and returns it to the LLM"
+                                )
 
                                 return result
                             elif (
@@ -251,12 +284,36 @@ def format_search_results(query, result):
     """
     print("\n🔄 STEP 8: LLM formats and presents the results to the user")
 
-    # Extract query plan if available
+    # Extract full query plan if available
     query_plan_explanation = ""
+    full_query_plan = {}
+
+    # Always extract the query plan from the result
     if "Query plan:" in result:
-        match = re.search(r'"explanation": "(.*?)"', result, re.DOTALL)
-        if match:
-            query_plan_explanation = match.group(1)
+        # Extract the full query plan JSON
+        query_plan_match = re.search(
+            r"Query plan:\s*\n(.*?)(?=\n\nResults:|\Z)", result, re.DOTALL
+        )
+
+        if query_plan_match:
+            try:
+                plan_text = query_plan_match.group(1).strip()
+                full_query_plan = json.loads(plan_text)
+            except Exception as e:
+                print(f"Error parsing full query plan: {str(e)}")
+                # Try fallback pattern
+                try:
+                    plan_text = re.sub(r"\s+", " ", plan_text)
+                    full_query_plan_str = re.search(r"\{.*\}", plan_text)
+                    if full_query_plan_str:
+                        full_query_plan = json.loads(full_query_plan_str.group(0))
+                except Exception as e2:
+                    print(f"Fallback parsing also failed: {str(e2)}")
+
+        # Get the explanation separately (as fallback)
+        expl_match = re.search(r'"explanation":\s*"([^"]*)"', result, re.DOTALL)
+        if expl_match:
+            query_plan_explanation = expl_match.group(1)
 
     # Check if products were found
     if "No products found" in result:
@@ -313,11 +370,6 @@ def format_search_results(query, result):
             if "description" in product:
                 response += f"   {product['description']}\n"
             response += "-" * 60 + "\n"
-
-        if query_plan_explanation:
-            response += (
-                f"\nI approached this search by {query_plan_explanation.lower()}"
-            )
 
         return response
     else:

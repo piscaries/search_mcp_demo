@@ -126,6 +126,53 @@ The demo demonstrates all steps of the search process:
 4. **Search Execution**: Elasticsearch runs the optimized search
 5. **Result Formatting**: Results are extracted and presented in a user-friendly format
 
+## Search Flow Architecture
+
+![Search Serving by MCP](./images/search-serving-by-MCP.png)
+
+The image above illustrates the complete search flow for a typical query: "I need a gift for someone who enjoys fitness and outdoor activities under $100". The process involves 8 distinct steps:
+
+### Step 1: LLM Decision
+
+The LLM analyzes the user query and decides to use the appropriate search tool based on the context.
+
+### Step 2: Preparing Arguments
+
+The LLM prepares the necessary arguments (query and index name) to pass to the search tool.
+
+### Step 3: Client-Server Communication
+
+The client sends a request to the MCP server with the query and arguments.
+
+### Step 4: Query Plan Generation
+
+The MCP server uses OpenAI to generate a query plan for Elasticsearch. This plan includes:
+
+- Whether to expand the query
+- Which ranking algorithm to use (e.g., BM25)
+- What filters to apply (price range, categories, tags)
+- Which fields to search
+- How to sort results
+- An explanation of the reasoning
+
+### Step 5: Elasticsearch Execution
+
+The MCP server executes the search against Elasticsearch based on the query plan.
+
+### Step 6: Server Response
+
+The MCP server sends the search results back to the client.
+
+### Step 7: Client Processing
+
+The client parses the response and prepares it for the LLM.
+
+### Step 8: Result Presentation
+
+The LLM formats and presents the search results to the user in a natural, readable format.
+
+This architecture demonstrates how LLMs can enhance traditional search engines by providing intelligent query planning and natural language understanding, making search results more relevant and easier to understand.
+
 ## Key Demo Features
 
 The `llm_search_mcp_demo.py` script simulates several search queries:

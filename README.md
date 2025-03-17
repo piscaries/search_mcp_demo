@@ -11,7 +11,10 @@ This project demonstrates how to use LLMs to enhance search functionality throug
 - Intelligent filtering and categorization
 - Result formatting and presentation
 
-The main demo script `llm_search_mcp_demo.py` shows the full power of combining LLMs with Elasticsearch for e-commerce search.
+The main demo scripts show the full power of combining LLMs with Elasticsearch for e-commerce search:
+
+- `openai_mcp_search_demo.py` - Implementation using OpenAI's function calling
+- `claude_mcp_search_demo.py` - Implementation using Claude's tool use capability
 
 ## Complete Setup Guide
 
@@ -20,7 +23,8 @@ The main demo script `llm_search_mcp_demo.py` shows the full power of combining 
 - macOS or Linux system
 - Python 3.10 or higher
 - Docker (for Elasticsearch)
-- OpenAI API key
+- OpenAI API key (for the OpenAI demo)
+- Anthropic API key (for the Claude demo)
 
 ### Step 1: Clone the Repository
 
@@ -106,13 +110,21 @@ OPENAI_MODEL=gpt-3.5-turbo
 
 ### Step 6: Run the Demo
 
-Now you can run the enhanced LLM demo:
+Now you can run either demo:
+
+#### OpenAI Demo
 
 ```bash
-poetry run python llm_search_mcp_demo.py
+poetry run python openai_mcp_search_demo.py
 ```
 
-This will:
+#### Claude Demo
+
+```bash
+poetry run python claude_mcp_search_demo.py
+```
+
+Each demo will:
 
 1. Start the MCP server
 2. Create a test e-commerce index with sample products
@@ -178,7 +190,7 @@ This architecture demonstrates how LLMs can enhance traditional search engines b
 
 ## Key Demo Features
 
-The `llm_search_mcp_demo.py` script simulates several search queries:
+The demo scripts simulate several search queries:
 
 - Searches for wireless headphones with noise cancellation
 - Finds kitchen products under a certain price with high ratings
@@ -218,13 +230,21 @@ If you encounter OpenAI API errors:
 2. Check you have sufficient API credits
 3. Try switching to a different model in the `.env` file
 
+### Anthropic API Issues
+
+If you encounter Anthropic API errors:
+
+1. Verify your Anthropic API key in the `.env` file
+2. Check you have sufficient API credits
+3. Ensure you're using a supported Claude model
+
 ## Extensions and Customization
 
 To extend the demo:
 
 1. Add more products in `create_ecommerce_test_index` function in `core.py`
 2. Modify the query planning prompt in `generate_query_plan` function
-3. Create new search queries in `simulate_enhanced_llm_conversation` function
+3. Create new search queries in the example functions
 
 ## Additional Scripts
 
@@ -237,5 +257,6 @@ Other useful scripts in this project:
 
 - Python 3.10+
 - Poetry
-- OpenAI API key
+- OpenAI API key (for OpenAI demo)
+- Anthropic API key (for Claude demo)
 - Elasticsearch 8.x

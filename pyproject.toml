@@ -16,6 +16,7 @@ elasticsearch = ">=8.17.2,<9.0.0"
 openai = ">=1.66.3,<2.0.0"
 python-dotenv = ">=1.0.1,<2.0.0"
 faker = ">=37.0.0,<38.0.0"
+anthropic = "^0.49.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

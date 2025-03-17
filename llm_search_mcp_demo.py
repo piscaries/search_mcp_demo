@@ -20,6 +20,11 @@ import threading
 import select
 from dotenv import load_dotenv
 import re
+from openai import OpenAI
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+import asyncio
+from contextlib import AsyncExitStack
 
 # Load environment variables
 load_dotenv()
@@ -33,6 +38,9 @@ if parent_dir not in sys.path:
 
 # Define the index name
 INDEX_NAME = "ecommerce"
+
+# Initialize the LLM client
+llm_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 
 class MCPClient:
@@ -435,37 +443,310 @@ def simulate_enhanced_llm_conversation(client):
         print(f"\n🤖 LLM: {formatted_response}")
 
 
+def real_llm_conversation(client):
+    """
+    A hybrid approach that combines the reliability of direct MCP client
+    with real LLM integration for better stability.
+    """
+    print("\n=== Real LLM Conversation (Hybrid Mode) ===")
+    print("This demonstrates how LLMs can integrate with MCP using a hybrid approach.")
+
+    # First, delete the existing index if it exists
+    print("\n[1] INITIALIZING DATA")
+    print("🤖 LLM: Let me clean up any existing data...")
+    try:
+        # Use direct search call
+        result = client.call_tool(
+            "search", {"query": "DELETE_INDEX", "index": INDEX_NAME}
+        )
+        print(f"✅ {result}")
+    except Exception as e:
+        print(f"⚠️ {e}")
+        print("Continuing with potentially existing data...")
+
+    # Create the ecommerce test index with fresh data
+    print("\n🤖 LLM: Setting up product catalog...")
+    result = client.call_tool("create_ecommerce_test_index", {"index": INDEX_NAME})
+    print(f"✅ {result}")
+
+    # Get available tools
+    print("\n[2] DISCOVERING TOOLS")
+    print("🤖 LLM: Discovering available MCP capabilities...")
+    tools = client.list_tools()
+
+    if not tools:
+        print("❌ No tools available from MCP. Exiting.")
+        return
+
+    # Convert MCP tools to OpenAI function format
+    openai_functions = []
+    for tool in tools:
+        # For the search tool, ensure our schema explicitly includes the index parameter
+        if tool.get("name") == "search":
+            openai_functions.append(
+                {
+                    "name": "search",
+                    "description": tool.get("description", ""),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query (supports natural language queries like 'red shoes under $50')",
+                            },
+                            "index": {
+                                "type": "string",
+                                "description": "The Elasticsearch index to search",
+                                "default": INDEX_NAME,
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                }
+            )
+        else:
+            openai_functions.append(
+                {
+                    "name": tool.get("name"),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get(
+                        "parameters", {"type": "object", "properties": {}}
+                    ),
+                }
+            )
+
+    print(f"✅ Discovered {len(tools)} MCP tools")
+
+    # Interactive conversation loop
+    print("\n[3] STARTING CONVERSATIONAL LOOP")
+    print("\n=== Interactive Mode with Real LLM ===")
+    print("Type your product queries below. Type 'exit', 'quit', or 'bye' to end.")
+
+    conversation_history = []  # Keep conversation context
+
+    while True:
+        try:
+            # Get user input
+            user_query = input("\n📱 User: ")
+            if user_query.lower() in ["exit", "quit", "bye"]:
+                print("🤖 LLM: Goodbye! Thanks for chatting.")
+                break
+
+            if not user_query.strip():
+                print("🤖 LLM: I didn't catch that. Please try again.")
+                continue
+
+            print("🤖 LLM: Processing your request...")
+
+            # Step 1: Update conversation history with user query
+            conversation_history.append({"role": "user", "content": user_query})
+
+            # Step 2: Ask LLM to decide which function to call
+            print("\n[4] LLM DECIDES ON TOOL USE")
+            llm_response = llm_client.chat.completions.create(
+                model="gpt-4",
+                messages=conversation_history,
+                functions=openai_functions,
+                function_call="auto",
+            )
+
+            # Get LLM's response
+            message = llm_response.choices[0].message
+            conversation_history.append(message)
+
+            # Print the raw OpenAI response to see what it contains
+            print("\n📋 RAW OPENAI RESPONSE (DECISION MAKING)")
+            print("-" * 50)
+            if hasattr(message, "content") and message.content:
+                print(f"Content: {message.content}")
+            if hasattr(message, "function_call"):
+                print(f"Function Call: {message.function_call}")
+                if hasattr(message.function_call, "name"):
+                    print(f"Tool Selected: {message.function_call.name}")
+                if hasattr(message.function_call, "arguments"):
+                    print(f"Parameters: {message.function_call.arguments}")
+            print("-" * 50)
+
+            # Check if LLM wants to call a function
+            if hasattr(message, "function_call") and message.function_call:
+                # Extract function details
+                function_name = message.function_call.name
+                function_args = json.loads(message.function_call.arguments)
+
+                # Ensure index parameter is set for search queries
+                if function_name == "search" and "index" not in function_args:
+                    function_args["index"] = INDEX_NAME
+                    print("⚠️ Adding missing index parameter to search query")
+
+                print(f"✅ LLM decided to use: {function_name}")
+                print(f"   with arguments: {json.dumps(function_args, indent=2)}")
+
+                # Step 3: Call the MCP tool using our reliable direct client
+                print("\n[5] EXECUTING MCP TOOL CALL")
+                print(f"Calling MCP tool: {function_name}...")
+
+                try:
+                    # Use the reliable direct client instead of async session
+                    result = client.call_tool(function_name, function_args)
+
+                    # For search specifically, extract and show query plan
+                    if function_name == "search" and "Query plan:" in result:
+                        print("\n[6] SEARCH QUERY PLANNING")
+
+                        match = re.search(
+                            r"Query plan:\s*\n([\s\S]*?)(?=\n\nResults:|\Z)",
+                            result,
+                            re.DOTALL,
+                        )
+                        if match:
+                            plan_text = match.group(1).strip()
+                            print(f"   Query Plan: {plan_text}")
+
+                    print("\n[7] PROCESSING MCP RESPONSE")
+                    print("✅ MCP tool execution complete")
+
+                    # Step 4: Add tool response to conversation history
+                    conversation_history.append(
+                        {"role": "function", "name": function_name, "content": result}
+                    )
+
+                    # Step 5: Ask LLM to generate a final response
+                    print("\n[8] LLM GENERATES FINAL RESPONSE")
+                    final_response = llm_client.chat.completions.create(
+                        model="gpt-4",
+                        messages=conversation_history,
+                    )
+
+                    # Get the final response
+                    final_message = final_response.choices[0].message
+                    conversation_history.append(final_message)
+
+                    # Display the final response
+                    print(f"\n🤖 LLM: {final_message.content}")
+
+                except Exception as e:
+                    print(f"❌ Error calling MCP tool: {str(e)}")
+                    print(
+                        f"🤖 LLM: I encountered an error while trying to search. Let me try another approach."
+                    )
+
+                    # Add error to conversation for LLM context
+                    conversation_history.append(
+                        {
+                            "role": "function",
+                            "name": function_name,
+                            "content": f"Error: {str(e)}",
+                        }
+                    )
+
+                    # Let LLM generate a response despite the error
+                    error_response = llm_client.chat.completions.create(
+                        model="gpt-4",
+                        messages=conversation_history,
+                    )
+
+                    error_message = error_response.choices[0].message
+                    conversation_history.append(error_message)
+                    print(f"\n🤖 LLM: {error_message.content}")
+            else:
+                # LLM chose to answer directly
+                print("✅ LLM decided to answer directly without using a tool")
+                print(f"\n🤖 LLM: {message.content}")
+
+        except Exception as e:
+            print(f"❌ Error in conversation loop: {str(e)}")
+            print("🤖 LLM: I'm having some technical difficulties. Let's try again.")
+
+
 def main():
     """Run the enhanced LLM integration demo."""
     print("=== Enhanced Search MCP LLM Integration Demo ===")
     print("This demo shows all steps of the LLM-MCP integration process")
 
-    # Start MCP server
-    server_process = start_mcp_server()
+    # Ask the user which mode to run
+    print("\nChoose a demo mode:")
+    print("1. Simulated LLM conversation (preset queries, no API costs)")
+    print("2. Real LLM conversation (interactive, requires OpenAI API key)")
 
-    if not server_process:
-        print("Failed to start MCP server. Exiting demo.")
-        return
+    choice = input("Enter your choice (1 or 2): ")
 
-    try:
-        # Create MCP client
-        client = MCPClient(server_process)
+    if choice == "2":
+        # Check if OpenAI API key is set
+        if not os.environ.get("OPENAI_API_KEY"):
+            print(
+                "Error: OpenAI API key not found. Set it in your .env file or environment variables."
+            )
+            print("Falling back to simulation mode.")
 
-        # Simulate enhanced LLM conversation
-        simulate_enhanced_llm_conversation(client)
+            # Start MCP server for simulation
+            server_process = start_mcp_server()
+            if not server_process:
+                print("Failed to start MCP server. Exiting demo.")
+                return
 
-    finally:
-        # Clean up
-        print("\n=== Cleaning Up ===")
-        print("Terminating MCP server...")
-        server_process.terminate()
+            try:
+                # Create MCP client
+                client = MCPClient(server_process)
+                simulate_enhanced_llm_conversation(client)
+            finally:
+                # Clean up
+                print("\n=== Cleaning Up ===")
+                print("Terminating MCP server...")
+                server_process.terminate()
+                try:
+                    server_process.wait(timeout=5)
+                    print("✅ MCP server terminated successfully")
+                except subprocess.TimeoutExpired:
+                    print("Server process did not terminate, killing it")
+                    server_process.kill()
+                    server_process.wait()
+        else:
+            # Start MCP server for real LLM hybrid approach
+            server_process = start_mcp_server()
+            if not server_process:
+                print("Failed to start MCP server. Exiting demo.")
+                return
+
+            try:
+                # Create MCP client
+                client = MCPClient(server_process)
+                # Use the hybrid approach instead of pure async
+                real_llm_conversation(client)
+            finally:
+                # Clean up
+                print("\n=== Cleaning Up ===")
+                print("Terminating MCP server...")
+                server_process.terminate()
+                try:
+                    server_process.wait(timeout=5)
+                    print("✅ MCP server terminated successfully")
+                except subprocess.TimeoutExpired:
+                    print("Server process did not terminate, killing it")
+                    server_process.kill()
+                    server_process.wait()
+    else:
+        # Default to simulation mode
+        server_process = start_mcp_server()
+        if not server_process:
+            print("Failed to start MCP server. Exiting demo.")
+            return
+
         try:
-            server_process.wait(timeout=5)
-            print("✅ MCP server terminated successfully")
-        except subprocess.TimeoutExpired:
-            print("Server process did not terminate, killing it")
-            server_process.kill()
-            server_process.wait()
+            # Create MCP client
+            client = MCPClient(server_process)
+            simulate_enhanced_llm_conversation(client)
+        finally:
+            # Clean up
+            print("\n=== Cleaning Up ===")
+            print("Terminating MCP server...")
+            server_process.terminate()
+            try:
+                server_process.wait(timeout=5)
+                print("✅ MCP server terminated successfully")
+            except subprocess.TimeoutExpired:
+                print("Server process did not terminate, killing it")
+                server_process.kill()
+                server_process.wait()
 
     print("\n=== Demo Completed ===")
 
